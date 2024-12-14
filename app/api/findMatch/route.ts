@@ -1,4 +1,4 @@
-import { NextApiRequest, NextApiResponse } from 'next';
+import { NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 
 if (!admin.apps.length) {
@@ -13,18 +13,15 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
-  const { uid, isSpeedGame, isNormalGame } = req.body;
-
-  if (!uid || typeof isSpeedGame !== 'boolean' || typeof isNormalGame !== 'boolean') {
-    return res.status(400).json({ message: 'Invalid input' });
-  }
-
+export async function POST(req: Request) {
   try {
+    const body = await req.json();
+    const { uid, isSpeedGame, isNormalGame } = body;
+
+    if (!uid || typeof isSpeedGame !== 'boolean' || typeof isNormalGame !== 'boolean') {
+      return NextResponse.json({ message: 'Invalid input' }, { status: 400 });
+    }
+
     const usersCollection = db.collection('users');
     const gamesCollection = db.collection('game');
 
@@ -32,14 +29,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const requestingPlayerSnapshot = await usersCollection.doc(uid).get();
 
     if (!requestingPlayerSnapshot.exists) {
-      return res.status(404).json({ message: 'User not found' });
+      return NextResponse.json({ message: 'User not found' }, { status: 404 });
     }
 
     const requestingPlayer = requestingPlayerSnapshot.data();
     const level = requestingPlayer?.level;
 
     if (typeof level !== 'number') {
-      return res.status(400).json({ message: 'Invalid user data' });
+      return NextResponse.json({ message: 'Invalid user data' }, { status: 400 });
     }
 
     const startTime = Date.now();
@@ -67,7 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (!matchedPlayer) {
-      return res.status(404).json({ message: 'No match found' });
+      return NextResponse.json({ message: 'No match found' }, { status: 404 });
     }
 
     // Randomly assign black or white player
@@ -86,9 +83,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     });
 
-    return res.status(200).json({ gameId: gameDocument.id });
+    return NextResponse.json({ gameId: gameDocument.id }, { status: 200 });
   } catch (error) {
     console.error('Error creating game:', error);
-    return res.status(500).json({ message: 'Internal server error' });
+    return NextResponse.json({ message: 'Internal server error' }, { status: 500 });
   }
 }
