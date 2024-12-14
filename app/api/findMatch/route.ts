@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 
 if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      }),
-    });
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    }),
+  });
+}
 
 const db = admin.firestore();
 
@@ -67,23 +67,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'No match found' }, { status: 404 });
     }
 
-    // Randomly assign black or white player
-    const isRequestingPlayerBlack = Math.random() < 0.5;
-    const blackPlayer = isRequestingPlayerBlack ? uid : matchedPlayer.id;
-    const whitePlayer = isRequestingPlayerBlack ? matchedPlayer.id : uid;
+    // Use a Firestore transaction to ensure a single game document is created
+    const matchUid = matchedPlayer.id;
+    const gameId = await db.runTransaction(async (transaction) => {
+      // Check if a game already exists for these players
+      const existingGameQuery = await gamesCollection
+        .where('black_player', 'in', [
+          usersCollection.doc(uid),
+          usersCollection.doc(matchUid),
+        ])
+        .get();
 
-    // Create the game document
-    const gameDocument = await gamesCollection.add({
-      black_player: usersCollection.doc(blackPlayer),
-      white_player: usersCollection.doc(whitePlayer),
-      isSpeedGame,
-      current_turn: usersCollection.doc(whitePlayer), // White always starts
-      game_finished: false,
-      game_result: '',
-      fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      if (!existingGameQuery.empty) {
+        return existingGameQuery.docs[0].id; // Return the existing game ID
+      }
+
+      // Randomly assign black or white player
+      const isRequestingPlayerBlack = Math.random() < 0.5;
+      const blackPlayer = isRequestingPlayerBlack ? uid : matchUid;
+      const whitePlayer = isRequestingPlayerBlack ? matchUid : uid;
+
+      // Create the game document
+      const newGameRef = gamesCollection.doc();
+      transaction.set(newGameRef, {
+        black_player: usersCollection.doc(blackPlayer),
+        white_player: usersCollection.doc(whitePlayer),
+        isSpeedGame,
+        current_turn: usersCollection.doc(whitePlayer), // White always starts
+        game_finished: false,
+        game_result: '',
+        fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      });
+
+      return newGameRef.id; // Return the newly created game ID
     });
 
-    return NextResponse.json({ gameId: gameDocument.id }, { status: 200 });
+    return NextResponse.json({ gameId }, { status: 200 });
   } catch (error) {
     console.error('Error creating game:', error);
     return NextResponse.json({ message: 'Internal server error' }, { status: 500 });
